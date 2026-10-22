@@ -302,7 +302,7 @@ with col1:
         )
 
 with col2:
-    st.subheader("👁️ Vista Previa en Tiempo Real")
+    st.subheader("Vista Previa en Tiempo Real")
     if archivo_subido:
         st.image(
             imagen_preview,
