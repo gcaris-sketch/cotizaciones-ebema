@@ -2,68 +2,89 @@ import io
 import fitz  # PyMuPDF
 import streamlit as st
 
-# Configuración de página
+# Configuración de la interfaz
 st.set_page_config(
     page_title="Modificador de Cotizaciones EBEMA",
     page_icon="📄",
-    layout="centered",
+    layout="wide",
 )
 
-st.title("📄 Modificador de Cotizaciones EBEMA")
+st.title("📄 Modificador Avanzado de Cotizaciones EBEMA")
 st.markdown(
-    "Esta herramienta detecta el último ítem de la **Nota de Venta / Cotización** "
-    "e inserta la leyenda en rojo justo debajo de los ítems."
+    "Añade leyendas y condiciones comerciales a tus cotizaciones con opciones de formato, "
+    "previsualización inmediata y cobertura de líneas de fondo."
 )
 
-# Texto por defecto breve, profesional y directo
+# Texto predeterminado
 TEXTO_PREDETERMINADO = (
     "NOTA: Los precios unitarios y la tarifa de flete son válidos exclusivamente "
     "para las cantidades cotizadas. Cualquier variación en el volumen de compra requerirá una recotización."
 )
 
-# Panel lateral de configuración
-with st.sidebar:
-    st.header("⚙️ Opciones de Estilo")
+# Diccionarios de configuración
+DICCIONARIO_COLORES = {
+    "Rojo Corporativo": (0.80, 0.00, 0.00),
+    "Rojo Vino / Granate": (0.50, 0.00, 0.10),
+    "Rojo Carmín Vivo": (0.90, 0.10, 0.10),
+    "Azul EBEMA": (0.00, 0.20, 0.60),
+    "Negro / Gris Oscuro": (0.15, 0.15, 0.15),
+}
 
-    # Selector de mayúsculas / minúsculas
+DICCIONARIO_FUENTES = {
+    "Helvetica (Limpia)": "helv",
+    "Helvetica Bold (Negrita)": "hebo",
+    "Times New Roman (Clásica)": "tiro",
+    "Courier (Monospaciada)": "cour",
+}
+
+DICCIONARIO_ALINEACION = {
+    "Justificado": fitz.TEXT_ALIGN_JUSTIFY,
+    "Centrado": fitz.TEXT_ALIGN_CENTER,
+    "Izquierda": fitz.TEXT_ALIGN_LEFT,
+}
+
+# --- BARRA LATERAL CON OPCIONES DE PERSONALIZACIÓN ---
+with st.sidebar:
+    st.header("⚙️ Opciones de Texto")
+
     formato_texto = st.radio(
-        "Formato del texto:",
+        "Formato de mayúsculas:",
         ["Original (Normal)", "MAYÚSCULAS"],
         index=0,
     )
 
-    estilo_caja = st.radio(
-        "Estilo visual:",
-        ["Recuadro destacado (Recomendado)", "Solo texto rojo"],
+    fuente_seleccionada = st.selectbox(
+        "Tipografía:",
+        list(DICCIONARIO_FUENTES.keys()),
         index=0,
     )
 
-    alineacion_str = st.selectbox(
-        "Alineación del texto:",
-        ["Justificado", "Centrado", "Izquierda"],
+    color_seleccionado = st.selectbox(
+        "Color del texto:",
+        list(DICCIONARIO_COLORES.keys()),
         index=0,
     )
 
-# Mapeo de alineaciones para PyMuPDF
-dict_alineacion = {
-    "Izquierda": fitz.TEXT_ALIGN_LEFT,
-    "Centrado": fitz.TEXT_ALIGN_CENTER,
-    "Justificado": fitz.TEXT_ALIGN_JUSTIFY,
-}
-align_val = dict_alineacion[alineacion_str]
+    alineacion_seleccionada = st.selectbox(
+        "Alineación:",
+        list(DICCIONARIO_ALINEACION.keys()),
+        index=0,
+    )
 
-# Editor del texto
-texto_a_insertar = st.text_area(
-    "Texto que se agregará:",
-    value=TEXTO_PREDETERMINADO,
-    height=110,
-)
+    st.divider()
+    st.header("🎨 Estilo de Recuadro / Fondo")
 
-# Aplicar formato de mayúsculas si corresponde
-if formato_texto == "MAYÚSCULAS":
-    texto_final = texto_a_insertar.upper()
-else:
-    texto_final = texto_a_insertar
+    estilo_fondo = st.radio(
+        "Apariencia del fondo:",
+        [
+            "Recuadro completo (Borde + Fondo suave)",
+            "Fondo Blanco (Oculta líneas de tabla, sin borde)",
+            "Fondo Rojo Suave (Sin borde)",
+            "Solo Borde (Fondo transparente)",
+            "Texto libre (Sin fondo ni borde)",
+        ],
+        index=0,
+    )
 
 
 def detectar_posicion_items(pagina):
@@ -133,15 +154,22 @@ def detectar_posicion_items(pagina):
     return max_item_y1, y_footer
 
 
-def procesar_pdf(pdf_bytes, texto_clausula, usar_recuadro, alineacion):
+def procesar_pdf(
+    pdf_bytes,
+    texto_clausula,
+    estilo_fondo_opcion,
+    color_rgb,
+    font_code,
+    align_val,
+    es_mayuscula,
+):
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-
     pagina = doc[-1]
     rect_pagina = pagina.rect
 
     max_item_y1, y_footer = detectar_posicion_items(pagina)
 
-    box_height = 42
+    box_height = 44
     margin_x = 38
     box_x0 = margin_x
     box_x1 = rect_pagina.width - margin_x
@@ -149,6 +177,7 @@ def procesar_pdf(pdf_bytes, texto_clausula, usar_recuadro, alineacion):
     box_y0 = max_item_y1 + 8
     box_y1 = box_y0 + box_height
 
+    # Pasar a página nueva si el espacio no es suficiente
     if box_y1 >= (y_footer - 5):
         pagina_destino = doc.new_page(
             width=rect_pagina.width, height=rect_pagina.height
@@ -160,30 +189,54 @@ def procesar_pdf(pdf_bytes, texto_clausula, usar_recuadro, alineacion):
 
     rect_box = fitz.Rect(box_x0, box_y0, box_x1, box_y1)
 
-    if usar_recuadro:
+    # Formato de mayúsculas
+    if es_mayuscula:
+        texto_clausula = texto_clausula.upper()
+
+    # Determinar bordes y fondos según selección
+    draw_border = False
+    draw_fill = False
+    color_borde = (0.85, 0.15, 0.15)
+    color_fondo = (0.99, 0.94, 0.94)
+
+    if estilo_fondo_opcion == "Recuadro completo (Borde + Fondo suave)":
+        draw_border = True
+        draw_fill = True
+    elif (
+        estilo_fondo_opcion
+        == "Fondo Blanco (Oculta líneas de tabla, sin borde)"
+    ):
+        draw_fill = True
+        color_fondo = (1.0, 1.0, 1.0)  # Blanco puro para tapar la cuadrícula
+    elif estilo_fondo_opcion == "Fondo Rojo Suave (Sin borde)":
+        draw_fill = True
+        color_fondo = (0.99, 0.94, 0.94)
+    elif estilo_fondo_opcion == "Solo Borde (Fondo transparente)":
+        draw_border = True
+
+    # Dibujar la figura de cobertura o recuadro
+    if draw_fill or draw_border:
         shape = pagina_destino.new_shape()
         shape.draw_rect(rect_box)
         shape.finish(
-            color=(0.85, 0.15, 0.15),
-            fill=(0.99, 0.94, 0.94),
-            width=0.75,
+            color=color_borde if draw_border else None,
+            fill=color_fondo if draw_fill else None,
+            width=0.75 if draw_border else 0,
         )
         shape.commit()
-
-        rect_texto = fitz.Rect(
-            box_x0 + 8, box_y0 + 4, box_x1 - 8, box_y1 - 4
-        )
+        rect_texto = fitz.Rect(box_x0 + 8, box_y0 + 4, box_x1 - 8, box_y1 - 4)
     else:
         rect_texto = rect_box
 
+    # Insertar el texto
     fontsize = 8.5
     rc = pagina_destino.insert_textbox(
         rect_texto,
         texto_clausula,
         fontsize=fontsize,
-        fontname="helv",
-        color=(0.7, 0.0, 0.0),
-        align=alineacion,
+        fontname=font_code,
+        color=color_rgb,
+        align=align_val,
     )
 
     if rc < 0:
@@ -191,33 +244,72 @@ def procesar_pdf(pdf_bytes, texto_clausula, usar_recuadro, alineacion):
             rect_texto,
             texto_clausula,
             fontsize=7.5,
-            fontname="helv",
-            color=(0.7, 0.0, 0.0),
-            align=alineacion,
+            fontname=font_code,
+            color=color_rgb,
+            align=align_val,
         )
+
+    # Generar imagen de vista previa
+    pix = pagina_destino.get_pixmap(dpi=150)
+    imagen_preview = pix.tobytes("png")
 
     buffer_salida = io.BytesIO()
     doc.save(buffer_salida)
     doc.close()
-    return buffer_salida.getvalue()
+
+    return buffer_salida.getvalue(), imagen_preview
 
 
-# Componente para subir el PDF
-archivo_subido = st.file_uploader(
-    "Arrastra tu cotización en PDF aquí", type=["pdf"]
-)
+# --- ESTRUCTURA PRINCIPAL DE LA PÁGINA ---
+col1, col2 = st.columns([1, 1], gap="medium")
 
-if archivo_subido:
-    if st.button("✨ Procesar Cotización", type="primary"):
-        usar_cuadro = estilo_caja == "Recuadro destacado (Recomendado)"
-        pdf_modificado = procesar_pdf(
-            archivo_subido.read(), texto_final, usar_cuadro, align_val
+with col1:
+    st.subheader("1. Edición del Texto")
+    texto_a_insertar = st.text_area(
+        "Redacta o modifica la cláusula:",
+        value=TEXTO_PREDETERMINADO,
+        height=110,
+    )
+
+    archivo_subido = st.file_uploader(
+        "2. Carga tu archivo PDF:", type=["pdf"]
+    )
+
+    if archivo_subido:
+        es_mayus = formato_texto == "MAYÚSCULAS"
+        color_rgb = DICCIONARIO_COLORES[color_seleccionado]
+        font_code = DICCIONARIO_FUENTES[fuente_seleccionada]
+        align_val = DICCIONARIO_ALINEACION[alineacion_seleccionada]
+
+        pdf_modificado, imagen_preview = procesar_pdf(
+            archivo_subido.read(),
+            texto_a_insertar,
+            estilo_fondo,
+            color_rgb,
+            font_code,
+            align_val,
+            es_mayus,
         )
 
-        st.success("¡Cotización procesada correctamente!")
+        st.success("¡Documento procesado con éxito!")
+
         st.download_button(
             label="📥 Descargar PDF Modificado",
             data=pdf_modificado,
             file_name=f"cotizacion_modificada_{archivo_subido.name}",
             mime="application/pdf",
+            type="primary",
+        )
+
+with col2:
+    st.subheader("👁️ Vista Previa en Tiempo Real")
+    if archivo_subido:
+        st.image(
+            imagen_preview,
+            caption="Resultado de la cotización procesada",
+            use_container_width=True,
+        )
+    else:
+        st.info(
+            "Carga un archivo PDF en el panel de la izquierda para ver la vista previa aquí."
         )
